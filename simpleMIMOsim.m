@@ -62,7 +62,7 @@ function simpleMIMOsim(varargin)
   
   % precompute bit labels
   par.Q = log2(length(par.symbols)); % number of bits per symbol
-  par.bits = de2bi(0:length(par.symbols)-1,par.Q,'left-msb');
+  par.bits = de2bi(0:length(par.symbols)-1,par.Q,'left-msb'); % Express symbols with bits (row vector)
 
   % track simulation time
   time_elapsed = 0;
