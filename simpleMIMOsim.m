@@ -12,14 +12,15 @@ function simpleMIMOsim(varargin)
     disp('using default simulation settings and parameters...')
         
     % set default simulation parameters 
-    par.simName = 'ERR_4x4_16QAM'; % simulation name (used for saving results)
+    par.simName = 'ERR_4x4_QPSK_ALL_1000'; % simulation name (used for saving results)
     par.runId = 0; % simulation ID (used to reproduce results)
     par.MR = 4; % receive antennas 
     par.MT = 4; % transmit antennas (set not larger than MR!) 
-    par.mod = '16QAM'; % modulation type: 'BPSK','QPSK','16QAM','64QAM'
-    par.trials = 10000; % number of Monte-Carlo trials (transmissions)
-    par.SNRdB_list = 10:4:42; % list of SNR [dB] values to be simulated
-    par.detector = {'ZF'}; % define detector(s) to be simulated  
+    par.mod = 'QPSK'; % modulation type: 'BPSK','QPSK','16QAM','64QAM'
+    par.trials = 1000; % number of Monte-Carlo trials (transmissions)
+    %par.SNRdB_list = 10:8:42; % list of SNR [dB] values to be simulated
+    par.SNRdB_list = 0:6:20; 
+    par.detector = {'ZF','bMMSE', 'uMMSE', 'ML', 'SDP'}; % define detector(s) to be simulated  
     
   else
       
@@ -113,6 +114,8 @@ function simpleMIMOsim(varargin)
             [idxhat,bithat] = uMMSE(par,H,y,N0);
           case 'ML', % ML detection using sphere decoding
             [idxhat,bithat] = ML(par,H,y);
+          case 'SDP', %SDP relaxation of ML detection
+              [idxhat, bithat] = SDP(par, H, y);
           otherwise,
             error('par.detector type not defined.')      
         end
@@ -244,3 +247,98 @@ function [idxML,bitML] = ML(par,H,y)
   end
   
 end
+
+%% Semidefinite Relaxation Rank1 Approx
+function [idxSDP,bitSDP] = SDP(par,H,y)
+    
+    yp = [real(y); imag(y)];
+    Hp = [real(H), -imag(H); imag(H), real(H)];
+    
+    C = [Hp'*Hp, -Hp'*yp; -yp'*Hp, yp'*yp];
+    
+    n = 2*par.MT + 1;
+    
+%     disp('TIME CVX')
+%     tic
+    
+    cvx_begin quiet
+        variable X(n,n) symmetric
+        minimize( trace(C*X) );
+        
+        subject to
+            diag(X) == 1;
+            
+        X == semidefinite(n);
+    cvx_end
+%     toc
+%     
+%     disp('TIME EIG')
+%     tic
+    [V,D] = eigs(X, 1);
+    
+    xopt = sqrt(D)*V;
+    xopt = sign(xopt);
+    t = xopt(end);
+    
+    xopt = xopt(1:2*par.MT);
+    xopt = xopt*t;
+    
+    xoptR = xopt(1:par.MT);
+    xoptI = xopt(par.MT+1:end);
+    
+    symbols = xoptR + 1i*xoptI;
+    
+    [~, idxSDP] = ismember(symbols, par.symbols);
+    bitSDP = par.bits(idxSDP,:);
+%     toc
+end
+
+%% Semidefinite Relaxation Randomization
+function [idxSDP,bitSDP] = SDPrand(par,H,y, L)
+    
+    yp = [real(y); imag(y)];
+    Hp = [real(H), -imag(H); imag(H), real(H)];
+    
+    C = [Hp'*Hp, -Hp'*yp; -yp'*Hp, yp'*yp];
+    
+    n = 2*par.MT + 1;
+        
+    cvx_begin quiet
+        variable X(n,n) symmetric
+        minimize( trace(C*X) );
+        
+        subject to
+            diag(X) == 1;
+            
+        X == semidefinite(n);
+    cvx_end
+    
+    % Generate random samples
+    cost = zeros(1,L);
+    samples = zeros(n, L);
+    for i = 1:L
+        xhi = mvnrnd(zeros(1:n), X);
+        x = sign(xhi);
+        
+        cost(i) = x'*C*x;
+        samples(:,i) = x;
+    end
+    
+    [~, idx] = min(cost);
+    xsol = samples(:,idx);
+    
+    t = xsol(end);
+    
+    xsol = xsol(1:2*par.MT);
+    xsol = xsol*t;
+    
+    xsolR = xsol(1:par.MT);
+    xsolI = xsol(par.MT+1:end);
+    
+    symbols = xsolR + 1i*xsolI;
+    
+    [~, idxSDP] = ismember(symbols, par.symbols);
+    bitSDP = par.bits(idxSDP,:);
+%     toc
+end
+
