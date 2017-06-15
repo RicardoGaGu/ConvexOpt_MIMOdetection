@@ -12,14 +12,14 @@ function simpleMIMOsim(varargin)
     disp('using default simulation settings and parameters...')
         
     % set default simulation parameters 
-    par.simName = 'ERR_4x4_16QAM'; % simulation name (used for saving results)
-    par.runId = 0; % simulation ID (used to reproduce results)
-    par.MR = 4; % receive antennas 
-    par.MT = 4; % transmit antennas (set not larger than MR!) 
-    par.mod = '16QAM'; % modulation type: 'BPSK','QPSK','16QAM','64QAM'
-    par.trials = 10000; % number of Monte-Carlo trials (transmissions)
-    par.SNRdB_list = 10:4:42; % list of SNR [dB] values to be simulated
-    par.detector = {'ZF'}; % define detector(s) to be simulated  
+    par.simName = 'ProvaSDR1'; % simulation name (used for saving results)
+    par.runId = 'default'; % simulation ID (used to reproduce results)
+    par.MR = 5; % receive antennas 
+    par.MT = 5; % transmit antennas (set not larger than MR!) 
+    par.mod = 'QPSK'; % modulation type: 'BPSK','QPSK','16QAM','64QAM'
+    par.trials = 750; % number of Monte-Carlo trials (transmissions)
+    par.SNRdB_list = 15; % list of SNR [dB] values to be simulated
+    par.detector = {'SDR RAND'}; % define detector(s) to be simulated
     
   else
       
@@ -72,7 +72,7 @@ function simpleMIMOsim(varargin)
   % initialize result arrays (detector x SNR)
   res.VER = zeros(length(par.detector),length(par.SNRdB_list)); % vector error rate
   res.SER = zeros(length(par.detector),length(par.SNRdB_list)); % symbol error rate
-  res.BER = zeros(length(par.detector),length(par.SNRdB_list)); % bit error rate
+  res.BER = zeros(length(par.detector),length(par.SNRdB_list),75); % bit error rate
 
   % generate random bit stream (antenna x bit x trial)
   bits = randi([0 1],par.MT,par.Q,par.trials);
@@ -113,16 +113,25 @@ function simpleMIMOsim(varargin)
             [idxhat,bithat] = uMMSE(par,H,y,N0);
           case 'ML', % ML detection using sphere decoding
             [idxhat,bithat] = ML(par,H,y);
+          case 'SDR SVD', % Semidefinite Relaxation detection
+            [idxhat,bithat] = SDR(par,H,y,d); 
+          case 'SDR RAND'
+            [idxhat,bithat] = SDR(par,H,y,d);    
           otherwise,
             error('par.detector type not defined.')      
         end
 
         % -- compute error metrics
-        err = (idx~=idxhat);
-        res.VER(d,k) = res.VER(d,k) + any(err);
-        res.SER(d,k) = res.SER(d,k) + sum(err)/par.MT;    
-        res.BER(d,k) = res.BER(d,k) + sum(sum(bits(:,:,t)~=bithat))/(par.MT*par.Q);      
-      
+        for l=1:7
+            display(l)
+            err = (idx~=idxhat(l,:));
+            res.VER(d,k) = res.VER(d,k) + any(err);
+            res.SER(d,k) = res.SER(d,k) + sum(err)/par.MT;
+            res.BER(d,k,l) = res.BER(d,k,l) + sum(sum(bits(:,:,t)~=bithat(l,:)))/(par.MT*par.Q);   
+            display(bits(:,:,t))
+            display(bithat(l,:))
+            
+        end
       end % algorithm loop
                  
     end % SNR loop    
@@ -134,7 +143,7 @@ function simpleMIMOsim(varargin)
       fprintf('estimated remaining simulation time: %3.0f min.\n',time_elapsed*(par.trials/t-1)/60);
       tic
     end      
-  
+    
   end % trials loop
 
   % normalize results
@@ -151,25 +160,146 @@ function simpleMIMOsim(varargin)
   
   marker_style = {'bo-','rs--','mv-.','kp:','g*-','c>--','yx:'};
   figure(1)
-  for d=1:length(par.detector)
-    if d==1
-      semilogy(par.SNRdB_list,res.BER(d,:),marker_style{d},'LineWidth',2)
+  j=1;
+  for i=1:7
+      semilogy(par.SNRdB_list,res.BER(1,:,i),marker_style{j},'LineWidth',2)
       hold on
-    else
-      semilogy(par.SNRdB_list,res.BER(d,:),marker_style{d},'LineWidth',2)
-    end
+      j=j+1;
   end
-  hold off
-  grid on
-  xlabel('average SNR per receive antenna [dB]','FontSize',12)
-  ylabel('bit error rate (BER)','FontSize',12)
-  axis([min(par.SNRdB_list) max(par.SNRdB_list) 1e-4 1])
-  legend(par.detector,'FontSize',12)
-  set(gca,'FontSize',12)
+  
+ hold off
+ grid on
+ xlabel('average SNR per receive antenna [dB]','FontSize',12)
+ ylabel('bit error rate (BER)','FontSize',12)
+ axis([min(par.SNRdB_list) max(par.SNRdB_list) 1e-4 1])
+ legend('Num Random 1','Num Random: 13','Num. Random: 26','Num Random: 38','Num Random: 63','Num Random: 75')
+ set(gca,'FontSize',12)
+
+%   for d=1:length(par.detector)
+%     if d==1
+%       for i=1:7
+%           semilogy(par.SNRdB_list,res.BER(d,:,i),marker_style{i},'LineWidth',2)
+%           hold on
+%       end
+%       break
+%     else
+%       semilogy(par.SNRdB_list,res.BER(d,:),marker_style{d},'LineWidth',2)
+%     end
+%   end
+%   hold off
+%   grid on
+%   xlabel('average SNR per receive antenna [dB]','FontSize',12)
+%   ylabel('bit error rate (BER)','FontSize',12)
+%   axis([min(par.SNRdB_list) max(par.SNRdB_list) 1e-4 1])
+%   legend('Num Random 1','Num Random 13','Num Random 26','Num Random 38','Num Random 63','Num Random 75')
+%   set(gca,'FontSize',12)
   
 end
 
 % -- set of detector functions 
+
+%% SDR detector
+function [idxhat,bithat] = SDR(par,H,y,d)
+
+% SDR detector: Solves the problem || y-Hx||^2 by a SDP relaxation and then
+% some rounding procedure that will be specified later on.
+
+% First of all, construct real valued homogeneous QCQP to be solved by SDP programming
+% I assume QPSK constellation s=+/-1+/-j  ( 2 bits/symbol)
+
+% Convert real valued
+y = [real(y); imag(y)];
+H=[real(H), -imag(H);imag(H),real(H)];
+
+% Construct auxiliary matrix
+C=[ H'*H , -H'*y ; -y'*H , y'*y];
+
+% Constraints
+p=0; % Number of inequalities
+m=2*(par.MT); % 2N equalities
+n=m+1;
+
+cvx_begin quiet
+    variable X(n,n) symmetric 
+    minimize(trace(C*X));
+    subject to
+          diag(X) == 1; 
+          X == semidefinite(n);  
+cvx_end
+Xopt=X;
+
+
+
+
+%%Gaussian Randomization Procedure to generate feasible points
+
+if strcmp(par.detector{d},'SDR RAND')
+    
+    % To get rid of round-off errors, compute a truly PSD matrix
+    [~,p]= chol(Xopt);
+    if (p~=0)
+       Xopt=nearestSPD(Xopt);
+    end
+
+    bithat=[];
+    idxhat=[];
+    for L=round(linspace(1,75,7))
+        %Generate Random samples
+        Xl=zeros(n,L);
+        fobj=zeros(L,1);
+        for l=1:L
+            xl= mvnrnd(zeros(1,n)',Xopt); 
+            xl=sign(xl');
+            fobj(l)= xl'*C*xl;
+            Xl(:,l)= xl;
+        end
+        [~,idxl]=min(fobj);
+        xhat=Xl(:,idxl);
+
+        %%Reconstruct bits
+
+        if  xhat(end) == -1
+            xhat=-xhat;
+        end    
+        sym = xhat(1:end-1); % extract slack variable
+        sym = sym(1:par.MT)+1i*sym(par.MT+1:end);
+        [~,id] = min(abs(sym*ones(1,length(par.symbols))-ones(par.MT,1)*par.symbols).^2,[],2); % Detect symbol 
+        idxhat =[idxhat; id];
+        b=par.bits(idxhat,:);
+        b=b(:);
+        bithat =[bithat ; b];% Demodulate to bits
+    end
+end
+
+%%Applying a rank one approximation in the least 2-norm sense (By Eigenvalue Decomposition)
+
+if strcmp(par.detector{d},'SDR SVD')
+    
+    % The svd only work fine if X is PSD (which was one of our contraints)
+    [U,S,V]=svd(Xopt);
+    largEigValue= S(1,1);
+    largEigVector= U(:,1);
+    x_opt = sqrt(largEigValue)*largEigVector;
+    xhat = x_opt;
+    xhat=sign(xhat);
+    %%Reconstruct bits
+    if  xhat(end) == -1
+        xhat=-xhat;
+    end    
+    sym = xhat(1:end-1); % extract slack variable
+    sym = sym(1:par.MT)+1i*sym(par.MT+1:end);
+    [~,idxhat] = min(abs(sym*ones(1,length(par.symbols))-ones(par.MT,1)*par.symbols).^2,[],2); % Detect symbol 
+    bithat = par.bits(idxhat,:); % Demodulate to bits
+
+end
+
+ 
+% In case of BPSK, we have a BQP to assure a feasible solution , we use the
+% sgn(·) operator 
+
+
+
+end
 
 %% zero-forcing (ZF) detector
 function [idxhat,bithat] = ZF(par,H,y)
